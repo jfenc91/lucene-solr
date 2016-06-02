@@ -18,6 +18,7 @@ package org.apache.lucene.search;
 
 
 import java.io.IOException;
+import java.lang.RuntimeException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -382,12 +383,10 @@ public class LRUQueryCache implements QueryCache, Accountable {
   }
 
   @Override
-  public Weight doCache(Weight weight, QueryCachingPolicy policy) {
-    while (weight instanceof CachingWrapperWeight) {
-      weight = ((CachingWrapperWeight) weight).in;
-    }
+  public Weight doCache(Query query, IndexSearcher searcher, boolean needsScores,  QueryCachingPolicy policy) {
 
-    return new CachingWrapperWeight(weight, policy);
+
+    return new CachingWrapperWeight(query, searcher, needsScores, policy);
   }
 
   @Override
@@ -570,21 +569,35 @@ public class LRUQueryCache implements QueryCache, Accountable {
 
   private class CachingWrapperWeight extends ConstantScoreWeight {
 
-    private final Weight in;
+    private Weight in = null;
     private final QueryCachingPolicy policy;
     // we use an AtomicBoolean because Weight.scorer may be called from multiple
-    // threads when IndexSearcher is created with threads
+    // threads when IndexSearcher is created with threadselasticsearch-2.3.2.tar.gz2222sdfasdf
     private final AtomicBoolean used;
+    private final boolean needsScores;
+    private final IndexSearcher searcher;
 
-    CachingWrapperWeight(Weight in, QueryCachingPolicy policy) {
-      super(in.getQuery());
-      this.in = in;
+    private void initWeight() {
+      try {
+        if (in == null) {
+          in = getQuery().createWeight(searcher, needsScores);
+        }
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
+    }
+
+    CachingWrapperWeight(Query query, IndexSearcher searcher, boolean needsScores, QueryCachingPolicy policy) {
+      super(query);
       this.policy = policy;
+      this.searcher = searcher;
+      this.needsScores = needsScores;
       used = new AtomicBoolean(false);
     }
 
     @Override
     public void extractTerms(Set<Term> terms) {
+      initWeight();
       in.extractTerms(terms);
     }
 
@@ -601,6 +614,7 @@ public class LRUQueryCache implements QueryCache, Accountable {
     }
 
     private DocIdSet cache(LeafReaderContext context) throws IOException {
+      initWeight();
       final BulkScorer scorer = in.bulkScorer(context);
       if (scorer == null) {
         return DocIdSet.EMPTY;
@@ -611,7 +625,7 @@ public class LRUQueryCache implements QueryCache, Accountable {
 
     private boolean shouldCache(LeafReaderContext context) throws IOException {
       return cacheEntryHasReasonableWorstCaseSize(ReaderUtil.getTopLevelContext(context).reader().maxDoc())
-          && policy.shouldCache(in.getQuery(), context);
+          && policy.shouldCache(getQuery(), context);
     }
 
     @Override
@@ -619,12 +633,13 @@ public class LRUQueryCache implements QueryCache, Accountable {
       if (used.compareAndSet(false, true)) {
         policy.onUse(getQuery());
       }
-      DocIdSet docIdSet = get(in.getQuery(), context);
+      DocIdSet docIdSet = get(getQuery(), context);
       if (docIdSet == null) {
-        if (shouldCache(context)) {
+        if(shouldCache(context)) {
           docIdSet = cache(context);
-          putIfAbsent(in.getQuery(), context, docIdSet);
+          putIfAbsent(getQuery(), context, docIdSet);
         } else {
+          initWeight();
           return in.scorer(context);
         }
       }
@@ -646,12 +661,13 @@ public class LRUQueryCache implements QueryCache, Accountable {
       if (used.compareAndSet(false, true)) {
         policy.onUse(getQuery());
       }
-      DocIdSet docIdSet = get(in.getQuery(), context);
+      DocIdSet docIdSet = get(getQuery(), context);
       if (docIdSet == null) {
         if (shouldCache(context)) {
           docIdSet = cache(context);
           putIfAbsent(in.getQuery(), context, docIdSet);
         } else {
+          initWeight();
           return in.bulkScorer(context);
         }
       }

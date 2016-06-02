@@ -31,6 +31,6 @@ public interface QueryCache {
    * NOTE: The returned weight will only be equivalent if scores are not needed.
    * @see Collector#needsScores()
    */
-  Weight doCache(Weight weight, QueryCachingPolicy policy);
+  Weight doCache(Query query, IndexSearcher searcher, boolean needsScores, QueryCachingPolicy policy);
 
 }

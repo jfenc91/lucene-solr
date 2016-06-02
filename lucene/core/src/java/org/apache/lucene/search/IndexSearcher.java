@@ -901,9 +901,12 @@ public class IndexSearcher {
    */
   public Weight createWeight(Query query, boolean needsScores) throws IOException {
     final QueryCache queryCache = this.queryCache;
-    Weight weight = query.createWeight(this, needsScores);
+    //Weight weight = query.createWeight(this, needsScores);
+    Weight weight = null;
     if (needsScores == false && queryCache != null) {
-      weight = queryCache.doCache(weight, queryCachingPolicy);
+      weight = queryCache.doCache(query, this, needsScores, queryCachingPolicy);
+    } else {
+      weight = query.createWeight(this, needsScores);
     }
     return weight;
   }
